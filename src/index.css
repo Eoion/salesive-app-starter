@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hide scrollbars on mobile (< md / 768px) while keeping scroll functional — the
+   panes still scroll by touch, just without a visible bar. Desktop keeps its
+   scrollbars so the notes list is obviously scrollable with a mouse. */
+@media (max-width: 767.98px) {
+    * {
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* legacy Edge/IE */
+    }
+    *::-webkit-scrollbar {
+        display: none; /* Chrome / Safari / Edge */
+    }
+}
+
+/* Splash entrance — a gentle fade + rise. Elements stagger via inline
+   animation-delay. `both` keeps them hidden until their delay elapses. */
+@keyframes splash-rise {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-splash {
+    animation: splash-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-splash {
+        animation: none;
+    }
+}
+
+/* Warm parchment surface — the app's page background. A faint dotted grain
+   gives it a paper feel without hurting text contrast. */
+.parchment {
+    background-color: #fbf5ec;
+    background-image: radial-gradient(
+        rgba(122, 82, 48, 0.05) 1px,
+        transparent 1.5px
+    );
+    background-size: 16px 16px;
+}
+
+/* Note body typography. A compact, warm "prose" — enough to make headings,
+   lists, code and quotes read well without the Typography plugin. Applied to the
+   TipTap editor content (src/components/NoteEditor.jsx). */
+.note-prose {
+    color: #3f342a;
+    font-size: 0.925rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.note-prose > :first-child { margin-top: 0; }
+.note-prose > :last-child { margin-bottom: 0; }
+.note-prose p { margin: 0.6em 0; }
+.note-prose h1,
+.note-prose h2,
+.note-prose h3,
+.note-prose h4 {
+    color: #332114;
+    font-weight: 700;
+    line-height: 1.25;
+    margin: 1.1em 0 0.5em;
+}
+.note-prose h1 { font-size: 1.4em; }
+.note-prose h2 { font-size: 1.22em; }
+.note-prose h3 { font-size: 1.08em; }
+.note-prose a {
+    color: #5f4025;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.note-prose a:hover { color: #48301c; }
+.note-prose strong { color: #332114; font-weight: 700; }
+.note-prose ul,
+.note-prose ol { margin: 0.6em 0; padding-left: 1.4em; }
+.note-prose ul { list-style: disc; }
+.note-prose ol { list-style: decimal; }
+.note-prose li { margin: 0.25em 0; }
+.note-prose blockquote {
+    margin: 0.8em 0;
+    padding: 0.2em 0 0.2em 1em;
+    border-left: 3px solid #cba878;
+    color: #6b5b48;
+    font-style: italic;
+}
+.note-prose code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+    background: #f1e5d2;
+    color: #5f4025;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+}
+.note-prose pre {
+    margin: 0.8em 0;
+    padding: 0.85em 1em;
+    background: #332114;
+    color: #f1e5d2;
+    border-radius: 10px;
+    overflow-x: auto;
+}
+.note-prose pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-size: 0.85em;
+}
+.note-prose hr { margin: 1.2em 0; border: 0; border-top: 1px solid #e0c9a6; }
+.note-prose img { max-width: 100%; height: auto; border-radius: 8px; margin: 0.6em 0; }
+.note-prose table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.8em 0;
+    font-size: 0.9em;
+    display: block;
+    overflow-x: auto;
+}
+.note-prose th,
+.note-prose td { border: 1px solid #e0c9a6; padding: 0.45em 0.7em; text-align: left; }
+.note-prose th { background: #faf1e2; font-weight: 600; }
+.note-prose input[type="checkbox"] { margin-right: 0.4em; }
+
+/* TipTap / ProseMirror editor (the note WYSIWYG). Content typography comes from
+   .note-prose above; these add the caret, focus and empty-placeholder behaviour.
+   See src/components/NoteEditor.jsx. */
+.ProseMirror { caret-color: #7a5230; }
+.ProseMirror:focus { outline: none; }
+.ProseMirror a { cursor: pointer; }
+.ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: #b8ab97;
+    float: left;
+    height: 0;
+    pointer-events: none;
+}
+
+/* Walnut wood grain — a warm brown with fine, slightly-angled grain lines and a
+   soft top-light / bottom-shadow so a tile reads as a rounded plank. */
+.wood-grain {
+    background-color: #7a5230;
+    background-image: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.12),
+            rgba(0, 0, 0, 0.16)
+        ),
+        repeating-linear-gradient(
+            93deg,
+            rgba(0, 0, 0, 0) 0px,
+            rgba(0, 0, 0, 0.06) 2px,
+            rgba(255, 255, 255, 0.04) 3px,
+            rgba(0, 0, 0, 0) 6px,
+            rgba(0, 0, 0, 0.05) 10px,
+            rgba(255, 255, 255, 0.03) 12px
+        );
+}
