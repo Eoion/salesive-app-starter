@@ -1,6 +1,17 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('tailwindcss').Config} */
 export default {
-    content: ["./index.html", "./src/**/*.{js,jsx}"],
+    // Absolute, because Tailwind resolves content globs against the working directory
+    // (the repo root, where npm runs), not against this file. Relative globs would
+    // match nothing and emit a stylesheet with no utilities in it.
+    content: [
+        path.join(__dirname, "index.html"),
+        path.join(__dirname, "src/**/*.{js,jsx}"),
+    ],
     theme: {
         extend: {
             colors: {

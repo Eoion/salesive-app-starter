@@ -9,7 +9,7 @@
     },
     "scripts": {
         "dev": "node server/index.js",
-        "build": "vite build",
+        "build": "node client/build.mjs",
         "start": "cross-env NODE_ENV=production node server/index.js",
         "preview": "npm run build && npm start"
     },

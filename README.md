@@ -8,7 +8,7 @@ Notes, and vice versa.
 - **React + Tailwind** front end and a **Node/Express** back end on **one port**.
 - The three things every app needs: **install** (OAuth 2.1 + PKCE), the **app** (served at the app URL `/`), and **webhooks** — plus a signed **session** so only the store that installed can see its data.
 - A small server-side **proxy** (`/api/notes`) forwards to the Apps API with the store's scoped token. The token never touches the browser; the shop is always derived from the signed session, **never** from the client.
-- **socket.io** streams live store events to the UI; the notes list auto-refreshes when a `notes` webhook arrives (`useWebhook` in `src/lib/socket.jsx`).
+- **socket.io** streams live store events to the UI; the notes list auto-refreshes when a `notes` webhook arrives (`useWebhook` in `client/src/lib/socket.jsx`).
 
 What you can do:
 
@@ -187,11 +187,31 @@ server/
   routes/            oauth · api (/me, /context) · webhooks · notes
   routes/proxy.js    forward an /api/* call to the Apps API + pipe the envelope back
   middleware/        requireShop (shop from session) · notFound (JSON 404) · errors (backstop)
-src/
-  main.jsx           React entry + <BrowserRouter>
-  App.jsx            <Routes> + session guard + Toast/Socket providers
-  routes/            notes/ (NotesShell · NotesList · NoteCreate · NoteDetail · NoteForm) · Install · NotFound
-  components/        Layout (top strip) · ui (buttons/forms/badges) · Avatar · Toast · Confirm · States · icons
-  lib/               api (CRUD client) · socket (live webhooks) · shop (session context) · permissions (optional embedded-runtime SDK) · format · hooks
-vite.config.js / tailwind.config.js / postcss.config.js
+client/              the whole front end — kept OUT of the repo root on purpose (see below)
+  index.html         Vite entry document
+  src/main.jsx       React entry + <BrowserRouter>
+  src/App.jsx        <Routes> + session guard + Toast/Socket providers
+  src/routes/        notes/ (NotesShell · NotesList · NoteCreate · NoteDetail · NoteForm) · Install · NotFound
+  src/components/    Layout (top strip) · ui (buttons/forms/badges) · Avatar · Toast · Confirm · States · icons
+  src/lib/           api (CRUD client) · socket (live webhooks) · shop (session context) · permissions (optional embedded-runtime SDK) · format · hooks
+  build.mjs          production build entry (`npm run build`) → ../dist
+  vite.config.js / tailwind.config.js / postcss.config.js
 ```
+
+### Why the front end lives in `client/`
+
+The deploy platform detects a project's stack by sniffing the repo root. A root-level
+`index.html` + `vite.config.js` makes it read this as a static Vite site: it publishes
+`dist/` and never boots the server, so the API, OAuth and socket.io simply don't exist in
+production. With the front end tucked into `client/`, the root is just `server/` +
+`package.json` and it deploys as the Node/Express app it actually is.
+
+Two consequences worth knowing before you rearrange anything:
+
+- **Don't move these files back to the root.** The build will still work locally and the
+  deploy will still go green — it'll just quietly serve a static site with no backend.
+- Because the Vite config isn't where the tools look by default, the paths are wired
+  explicitly: `postcss.config.js` names the Tailwind config, and `tailwind.config.js` uses
+  absolute `content` globs. Tailwind resolves those globs against the working directory,
+  not its own location, so relative paths would match nothing and emit a stylesheet with
+  the base reset and none of the app's styles — a build that succeeds and looks broken.

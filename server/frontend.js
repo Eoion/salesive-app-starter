@@ -27,9 +27,12 @@ export async function serveFrontend(app, { root, server, isProd }) {
     // Dev: Vite serves the React app + HMR through Express on this one port. If you
     // ever hit a websocket "handleUpgrade" conflict with socket.io, give HMR its
     // own dev ws port instead: hmr: { port: <something> }.
+    //
+    // Vite's root is client/, not the repo root — that's where index.html, src/ and
+    // vite.config.js live (see client/vite.config.js for why).
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-        root,
+        root: path.join(root, "client"),
         appType: "spa",
         server: { middlewareMode: true, hmr: { server } },
     });
