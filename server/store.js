@@ -140,19 +140,38 @@ async function createMongoStore(uri) {
 // in-memory backend so imports work before initStore() runs (e.g. in tests).
 let backend = createMemoryStore();
 
-// Pick the backend. Never throws: a MongoDB misconfiguration degrades to memory so
-// the sample always boots. Returns a human label for the startup banner.
+// Pick the backend. On a long-lived host this never throws: a MongoDB misconfiguration
+// degrades to memory so the sample always boots. Returns a human label for the banner.
+//
+// On SERVERLESS (Vercel) it throws instead, on purpose. Instances share no memory, so a
+// memory fallback would write the pending OAuth state on one instance and look for it on
+// another — every install would fail with "invalid state", and installs would vanish
+// between requests. That's a confusing runtime bug; a loud boot failure is kinder.
 export async function initStore() {
     if (config.mongoUri) {
         try {
             backend = await createMongoStore(config.mongoUri);
             return "mongodb";
         } catch (err) {
+            if (config.isServerless) {
+                throw new Error(
+                    `[store] MongoDB init failed (${err.message}). A serverless deployment ` +
+                        `cannot fall back to the in-memory store — instances share no memory, so ` +
+                        `OAuth installs would break. Fix MONGODB_URI and redeploy.`,
+                );
+            }
             console.warn(
                 `\n  [store] MongoDB init failed (${err.message}).` +
                     `\n  Falling back to in-memory — installs will NOT persist across restarts.\n`,
             );
         }
+    } else if (config.isServerless) {
+        throw new Error(
+            `[store] MONGODB_URI is required on a serverless deployment. Instances share no ` +
+                `memory, so the in-memory store cannot hold an OAuth install: the callback would ` +
+                `land on a different instance than the one that created the pending state. Add ` +
+                `MONGODB_URI to the project's environment variables and redeploy.`,
+        );
     }
     backend = createMemoryStore();
     return config.mongoUri ? "in-memory (MongoDB fallback)" : "in-memory";

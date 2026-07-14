@@ -22,6 +22,12 @@ export function attachSockets(io) {
 }
 
 // Push a payload to every frontend connected for a shop.
+//
+// `io` is null on serverless (api/index.js), where there are no sockets to push to —
+// the webhook is still received, verified and processed, the UI just learns about it on
+// its next poll instead. Returns whether the payload was actually pushed.
 export function emitWebhook(io, shop, payload) {
+    if (!io) return false;
     io.to(String(shop)).emit("webhook", payload);
+    return true;
 }

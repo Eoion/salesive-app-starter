@@ -176,8 +176,11 @@ This is a sample app — tighten these before shipping:
 ## Project layout
 
 ```
+api/
+  index.js           Vercel entry — the Express app as a serverless function
 server/
-  index.js           app wiring + middleware order (read it top-to-bottom)
+  app.js             the Express app itself (shared by both entry points)
+  index.js           long-lived entry: socket.io + front end + listen(port)
   config.js          env → typed config (scopes, URLs, secrets)
   salesive.js        OAuth/PKCE, token refresh, scoped API calls
   session.js         signed HttpOnly session cookie (the security anchor)
@@ -215,3 +218,51 @@ Two consequences worth knowing before you rearrange anything:
   absolute `content` globs. Tailwind resolves those globs against the working directory,
   not its own location, so relative paths would match nothing and emit a stylesheet with
   the base reset and none of the app's styles — a build that succeeds and looks broken.
+
+## Deploying
+
+The app supports two hosting models from one codebase. The **server** decides which one is
+in play and tells the front end (`realtime` on `/api/me`), so there is no build-time flag
+to set and nothing to keep in sync.
+
+### A long-lived Node process (Pxxl, Render, Fly, a VM) — the full-featured path
+
+Entry point `server/index.js`. Everything on one port: API, OAuth, webhooks, socket.io and
+the front end. Webhooks are **pushed** to the browser the moment they arrive. Set the env
+vars from `.env.example`, point `APP_BASE_URL` at the public URL, and run `npm start`
+(`npm run build` first — the platform normally does this for you).
+
+### Vercel — serverless
+
+Entry point `api/index.js`; routing lives in `vercel.json`. `/api/*`, `/oauth/*` and
+`/webhooks` rewrite to the function; everything else is served from the static `dist/`
+build by the CDN, with an SPA fallback to `index.html`.
+
+Deploy: import the repo at [vercel.com/new](https://vercel.com/new) (framework preset
+**Other** — `vercel.json` already sets the build command and output directory), add the env
+vars below, then register `https://<your-domain>/oauth/callback` as a redirect URI on your
+app in the Salesive Developer console and set the webhook URL to
+`https://<your-domain>/webhooks`.
+
+Required env vars: `SALESIVE_CLIENT_ID`, `SALESIVE_CLIENT_SECRET`,
+`SALESIVE_WEBHOOK_SECRET`, `APP_BASE_URL` (your production domain — not the per-deployment
+preview URL, which changes on every push and can't be a registered redirect URI), and
+`MONGODB_URI`.
+
+Two things behave differently here, both consequences of serverless, not bugs to fix:
+
+- **`MONGODB_URI` is mandatory.** Instances share no memory, so the in-memory store would
+  write the pending OAuth state on one instance and look for it on another — every install
+  would fail with "invalid state". The app deliberately **refuses to boot** on Vercel
+  without it rather than degrade into that bug.
+- **No socket.io — the UI polls instead** (every 10s, plus on tab focus). A webhook POST
+  lands on a different function instance than the one holding the browser's socket, and
+  Vercel provides no fan-out between instances, so a push would emit into the void. The
+  webhook is still received, verified and processed; the UI just learns about it on its next
+  poll. If you need true push here, the options are a Redis-backed socket.io adapter or a
+  hosted realtime service (Ably/Pusher) — see `client/src/lib/socket.jsx`.
+
+When adding a page that refreshes on store changes, use `shouldRefetch(payload, resource)`
+from `client/src/lib/socket.jsx` rather than comparing `webhookResource(payload)` yourself:
+on Vercel every payload is a poll tick with no resource, so a bare comparison never matches
+and the page silently stops updating.

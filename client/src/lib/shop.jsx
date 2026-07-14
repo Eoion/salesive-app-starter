@@ -76,6 +76,11 @@ export function ShopProvider({ children }) {
             logout,
             authenticated: Boolean(me?.authenticated),
             shop: me?.shop || null,
+            // "socket" (long-lived server pushes) or "poll" (serverless). The server
+            // decides — see server/config.js. Default to socket for older servers that
+            // don't report it; a never-connecting socket is a safer default than a
+            // poller that hammers the API on a host that doesn't need one.
+            realtime: me?.realtime === "poll" ? "poll" : "socket",
         }),
         [launchShop, me, loading, refetch, logout],
     );

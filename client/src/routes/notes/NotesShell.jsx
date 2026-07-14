@@ -1,7 +1,7 @@
 import { Outlet, useLocation, useMatch } from "react-router-dom";
 import { apiGet } from "../../lib/api.js";
 import { useAsync, useVisibilityRefetch } from "../../lib/hooks.js";
-import { useWebhook, webhookResource } from "../../lib/socket.jsx";
+import { useWebhook, shouldRefetch } from "../../lib/socket.jsx";
 import { Button, cx } from "../../components/ui.jsx";
 import { NoteIcon } from "../../components/icons.jsx";
 import NotesList from "./NotesList.jsx";
@@ -20,12 +20,13 @@ export default function NotesShell() {
     const { data, loading, error, refetch } = useAsync(() => apiGet("/notes"), []);
     const notes = Array.isArray(data) ? data : [];
 
-    // Freshness for a resource without a guaranteed push: refetch on tab focus and
-    // when a "notes" webhook arrives.
+    // Freshness for a resource without a guaranteed push: refetch on tab focus, and
+    // when a "notes" webhook arrives (or, on a serverless host with no push, on each
+    // poll tick — shouldRefetch covers both).
     useVisibilityRefetch(refetch);
     useWebhook(
         (payload) => {
-            if (webhookResource(payload) === "notes") refetch();
+            if (shouldRefetch(payload, "notes")) refetch();
         },
         [refetch],
     );

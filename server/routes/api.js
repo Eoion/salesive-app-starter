@@ -56,6 +56,11 @@ router.get("/me", async (req, res, next) => {
                 ? `/oauth/start?shop=${encodeURIComponent(launchShop)}`
                 : "/oauth/start",
             clientId: config.clientId || null,
+            // How this deployment delivers store events: "socket" (a long-lived server
+            // pushes over socket.io) or "poll" (serverless — the UI refetches on an
+            // interval). The SERVER decides, so the same front-end build is correct on
+            // both hosts and there's no build-time flag to forget. See client/src/lib/socket.jsx.
+            realtime: config.realtime,
         });
     } catch (err) {
         next(err);
