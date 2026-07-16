@@ -39,6 +39,8 @@ const MSG_APP_OPENED = "salesive:app-opened";
 const MSG_APP_MINIMIZED = "salesive:app-minimized";
 const MSG_APP_CLOSED = "salesive:app-closed";
 const MSG_APP_WAKE = "salesive:app-wake";
+const MSG_APP_LOGOUT = "salesive:app-logout";
+const MSG_STORE_CHANGED = "salesive:store-changed";
 
 // One-time pending resolvers keyed by permission name.
 const pendingPermissions = {};
@@ -49,11 +51,15 @@ const openedCallbacks    = new Set();
 const minimizedCallbacks = new Set();
 const closedCallbacks    = new Set();
 const wakeCallbacks      = new Set();
+// Session-boundary callbacks.
+const logoutCallbacks       = new Set();
+const storeChangedCallbacks = new Set();
 const genericCallbacks   = new Map();
 
 // Single shared listener — all incoming messages routed here.
 window.addEventListener("message", (event) => {
-    const { type, permission, granted, mode, expiresAt, permissions } = event.data || {};
+    const { type, permission, granted, mode, expiresAt, permissions,
+            shopId, shopName, previousShopId } = event.data || {};
 
     if (type === MSG_RESPONSE && permission) {
         const resolve = pendingPermissions[permission];
@@ -75,6 +81,11 @@ window.addEventListener("message", (event) => {
         minimizedCallbacks.forEach((cb) => cb());
     } else if (type === MSG_APP_CLOSED) {
         closedCallbacks.forEach((cb) => cb());
+    } else if (type === MSG_APP_LOGOUT) {
+        logoutCallbacks.forEach((cb) => cb());
+    } else if (type === MSG_STORE_CHANGED && shopId) {
+        const payload = { shopId, shopName, previousShopId: previousShopId ?? null };
+        storeChangedCallbacks.forEach((cb) => cb(payload));
     }
     if (type) {
         const cbs = genericCallbacks.get(type);
@@ -178,6 +189,37 @@ export function onAppClosed(callback) {
 export function onAppWake(callback) {
     wakeCallbacks.add(callback);
     return () => wakeCallbacks.delete(callback);
+}
+
+/**
+ * Register a callback that fires when the merchant logs out of Salesive.
+ * The dashboard clears only its own origin's storage — this app is on another
+ * origin, so clear its token here or the next merchant to log in on this
+ * browser inherits the session.
+ * Must be synchronous: the dashboard waits ~150ms, then destroys the iframe.
+ * Use navigator.sendBeacon() if the server must be told too.
+ * Returns an unsubscribe function.
+ * @param {() => void} callback
+ * @returns {() => void}
+ */
+export function onLogout(callback) {
+    logoutCallbacks.add(callback);
+    return () => logoutCallbacks.delete(callback);
+}
+
+/**
+ * Register a callback that fires when the merchant switches the active store.
+ * The iframe reloads immediately after with the new `shop` query param, so that
+ * reload — not this callback — is what boots the app under the new store. Use
+ * this to drop caches that outlive a reload (IndexedDB, localStorage) and to
+ * save in-progress work. Keep it synchronous.
+ * Returns an unsubscribe function.
+ * @param {(store: { shopId: string, shopName?: string, previousShopId: string|null }) => void} callback
+ * @returns {() => void}
+ */
+export function onStoreChanged(callback) {
+    storeChangedCallbacks.add(callback);
+    return () => storeChangedCallbacks.delete(callback);
 }
 
 /**
