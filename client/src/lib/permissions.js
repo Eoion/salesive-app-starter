@@ -26,6 +26,10 @@
  *
  * // Ask the dashboard to expand (only works if AUTO_LAUNCH is granted):
  * onLaunch();
+ *
+ * // Prove to your own backend which store and user is calling:
+ * const token = await getSessionToken();
+ * fetch("/api/session", { headers: { Authorization: `Bearer ${token}` } });
  */
 
 const PARENT = window.parent !== window ? window.parent : null;
@@ -235,4 +239,82 @@ export function onEvent(type, callback) {
     const cbs = genericCallbacks.get(type);
     cbs.add(callback);
     return () => cbs.delete(callback);
+}
+
+// ── Session tokens ────────────────────────────────────────────────────────────
+// Mirrors getSessionToken() in salesive-dev-tools/permissions. Keep them in step.
+
+const MSG_GET_SESSION_TOKEN = "salesive:get-session-token";
+const MSG_SESSION_TOKEN = "salesive:session-token";
+// Refresh this long before expiry so a token never dies in flight to your backend.
+const SESSION_TOKEN_REFRESH_MARGIN_MS = 10_000;
+const pendingSessionTokens = {};
+let sessionTokenSeq = 0;
+let cachedSessionToken = null; // { token, expiresAtMs }
+let inflightToken = null;
+
+export class SessionTokenError extends Error {
+    constructor(code, message) {
+        super(message || code);
+        this.name = "SessionTokenError";
+        this.code = code;
+    }
+}
+
+window.addEventListener("message", (event) => {
+    const { type, requestId, token, expiresAt, error } = event.data || {};
+    if (type === MSG_APP_LOGOUT || type === MSG_STORE_CHANGED) {
+        cachedSessionToken = null;
+        return;
+    }
+    // Only the dashboard (our parent window) may answer.
+    if (type !== MSG_SESSION_TOKEN || !requestId || event.source !== PARENT) return;
+    const resolve = pendingSessionTokens[requestId];
+    if (resolve) {
+        delete pendingSessionTokens[requestId];
+        resolve({ token, expiresAt, error });
+    }
+});
+
+/**
+ * Get a session token: a 60 second JWT, signed by Salesive, that proves to YOUR
+ * backend which store (`dest`) and which signed in user (`sub`) is using the app.
+ * Send it as `Authorization: Bearer <token>`; the server verifies it in
+ * server/sessionToken.js. Cached here until shortly before it expires, so call it
+ * before every request.
+ *
+ * @param {{ timeoutMs?: number, forceRefresh?: boolean }} [options]
+ * @returns {Promise<string>} rejects with SessionTokenError (`code`: not_embedded,
+ *   timeout, not_installed, or the dashboard's error)
+ */
+export function getSessionToken({ timeoutMs = 10_000, forceRefresh = false } = {}) {
+    if (!PARENT) return Promise.reject(new SessionTokenError("not_embedded", "Not running inside the Salesive dashboard"));
+    if (!forceRefresh && cachedSessionToken && cachedSessionToken.expiresAtMs - SESSION_TOKEN_REFRESH_MARGIN_MS > Date.now()) {
+        return Promise.resolve(cachedSessionToken.token);
+    }
+    if (!forceRefresh && inflightToken) return inflightToken;
+
+    const requestId = `st_${Date.now()}_${++sessionTokenSeq}`;
+    const request = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            if (pendingSessionTokens[requestId]) {
+                delete pendingSessionTokens[requestId];
+                reject(new SessionTokenError("timeout", "The dashboard did not answer the session token request"));
+            }
+        }, timeoutMs);
+        pendingSessionTokens[requestId] = ({ token, expiresAt, error }) => {
+            clearTimeout(timer);
+            if (!token || error) return reject(new SessionTokenError(error || "unavailable"));
+            const expiresAtMs = expiresAt ? Date.parse(expiresAt) : NaN;
+            cachedSessionToken = { token, expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() };
+            resolve(token);
+        };
+        PARENT.postMessage({ type: MSG_GET_SESSION_TOKEN, requestId }, "*");
+    });
+    inflightToken = request;
+    const clear = () => {
+        if (inflightToken === request) inflightToken = null;
+    };
+    request.then(clear, clear);
+    return request;
 }

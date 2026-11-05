@@ -143,6 +143,27 @@ for another store **overwrites** the cookie (there's no multi-store switching). 
 > so they're separate.) For production, prefer an **App Bridge session token** in an `Authorization`
 > header over the cookie — it sidesteps cross-site cookies and CSRF entirely.
 
+### Session tokens: no redirect, no cookie
+
+Inside the dashboard the front end can ask Salesive for a **session token** with
+`getSessionToken()` (`client/src/lib/permissions.js`): a 60 second JWT, signed ES256 by Salesive,
+naming the store (`dest`), the signed in user (`sub`, with `role` owner or staff) and your app
+(`aud`, your client id). Nobody can forge it, unlike `?shop=`.
+
+- **Verify it** with `server/sessionToken.js`. It fetches and caches Salesive's public key from
+  `<SALESIVE_API_BASE>/api/v1/oauth/jwks` and checks the signature, `alg`, `aud`, `iss`, `exp` and
+  `nbf`. Never skip the `aud` check: every app's tokens share one signing key.
+- **Gate a route** with `requireSessionToken` (`server/middleware/requireSessionToken.js`), which
+  sets `req.shop` from the token. `GET /api/session` is a worked example.
+- **Install without the redirect.** On first load inside the dashboard, if there is no cookie session,
+  the client posts a fresh session token to `POST /api/session/exchange`. The server trades it for an
+  access token (OAuth token exchange, `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`),
+  stores the install, and sets the usual session cookie. The gate's redirect install stays as the
+  fallback, for example when the app is opened outside the dashboard.
+
+Each session token can be exchanged once, so ask for a fresh one (`forceRefresh: true`) for the
+exchange. Exchange only when you hold no token for the store; then refresh as usual.
+
 ### Webhooks are notify-only
 
 A Salesive webhook tells you *what* changed (`topic`, `resource`, `resourceId`, `shopId`) — it never
@@ -162,9 +183,9 @@ This is a sample app — tighten these before shipping:
 
 - **Serve over HTTPS.** The session cookie is `SameSite=None; Secure`, so it's only stored over HTTPS
   (localhost aside). Without it, no one stays logged in.
-- **Move to App Bridge session tokens.** The cookie session (`server/session.js`) is solid, but
-  third-party-cookie blocking makes embedded merchants re-auth. A signed session token passed in the
-  iframe is the robust upgrade — wire it in when Salesive's App Bridge ships.
+- **Move your routes to session tokens.** The cookie session (`server/session.js`) is solid, but
+  third party cookie blocking makes embedded merchants re-auth. Gate your own routes with
+  `requireSessionToken` and send `getSessionToken()` from the client (see "Session tokens" above).
 - **Persist installs + encrypt tokens.** `server/store.js` ships with two backends: a zero-config
   in-memory store (the default) and MongoDB (set `MONGODB_URI`). The in-memory store loses installs on
   restart, so use a database in production — and encrypt the stored `app_` tokens at rest (they're kept

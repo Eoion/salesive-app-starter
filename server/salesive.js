@@ -80,6 +80,20 @@ export function exchangeCode({ code, codeVerifier }) {
     });
 }
 
+// Token exchange: trade a session token from the dashboard (getSessionToken) for an
+// app access token. This is how an EMBEDDED app installs with no OAuth redirect: the
+// merchant already approved the app in Salesive, and the session token proves which
+// store and user is asking. Each session token can be exchanged once.
+export function exchangeSessionToken(sessionToken) {
+    return postToken({
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: sessionToken,
+        subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+    });
+}
+
 export function refreshToken(refresh_token) {
     return postToken({
         grant_type: "refresh_token",

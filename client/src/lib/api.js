@@ -46,6 +46,27 @@ export function isEmbedded() {
     return new URLSearchParams(window.location.search).get("embedded") === "1";
 }
 
+// Embedded install with no OAuth redirect. Inside the dashboard, ask for a FRESH
+// session token (each one can be exchanged once) and hand it to the server, which
+// trades it for an access token and sets the session cookie. Resolves true when
+// this browser is now signed in; false outside the dashboard or if the server
+// refused (then the gate's redirect install still works).
+export async function embeddedSignIn() {
+    if (window.parent === window) return false;
+    try {
+        const { getSessionToken } = await import("./permissions.js");
+        const token = await getSessionToken({ forceRefresh: true, timeoutMs: 5_000 });
+        const res = await fetch("/api/session/exchange", {
+            method: "POST",
+            credentials: "include",
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
 // Ask the server who this browser is. `credentials: "include"` sends the session
 // cookie — required because, embedded in the dashboard, the request is cross-site.
 export async function fetchMe(shop) {

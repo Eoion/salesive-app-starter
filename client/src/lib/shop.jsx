@@ -9,6 +9,7 @@ import {
 import {
     getShop,
     fetchMe,
+    embeddedSignIn,
     logout as apiLogout,
     setUnauthorizedHandler,
 } from "./api.js";
@@ -45,9 +46,23 @@ export function ShopProvider({ children }) {
         }
     }, [launchShop]);
 
+    // First load: if the cookie session is missing but we are inside the dashboard,
+    // sign in with a session token (token exchange) before showing the gate. Only
+    // here, not on every revalidation: a 401 later means the app was uninstalled,
+    // and an exchange would just be refused.
     useEffect(() => {
-        refetch();
-    }, [refetch]);
+        (async () => {
+            try {
+                let first = await fetchMe(launchShop);
+                if (!first?.authenticated && (await embeddedSignIn())) {
+                    first = await fetchMe(launchShop);
+                }
+                setMe(first);
+            } finally {
+                setLoading(false);
+            }
+        })();
+    }, [launchShop]);
 
     // Sign this browser out (clears the session cookie), then re-ask /me so the UI
     // drops back to the install gate. The store stays installed.

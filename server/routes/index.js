@@ -11,6 +11,8 @@ import { notFound } from "../middleware/notFound.js";
 //   GET  /oauth/start         begin OAuth 2.1 + PKCE install
 //   GET  /oauth/callback      finish install (code → tokens)
 //   GET  /api/me              install state + scopes for the front end
+//   GET  /api/session         example route authenticated by a session token
+//   POST /api/session/exchange embedded install: session token → access token
 //   /api/notes                notes CRUD proxied to the Salesive Apps API, gated by
 //                             requireShop (shop derived from the session cookie).
 export function registerRoutes(app, { io }) {

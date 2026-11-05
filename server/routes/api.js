@@ -1,8 +1,20 @@
 import { Router } from "express";
 import { config } from "../config.js";
 import { store } from "../store.js";
-import { verifyInstallation, callSalesiveApi } from "../salesive.js";
-import { readSession, clearSessionCookie, clearLegacyCookies } from "../session.js";
+import {
+    verifyInstallation,
+    callSalesiveApi,
+    exchangeSessionToken,
+    persistTokens,
+} from "../salesive.js";
+import {
+    readSession,
+    clearSessionCookie,
+    clearLegacyCookies,
+    setSessionCookie,
+} from "../session.js";
+import { bearerFrom } from "../sessionToken.js";
+import { requireSessionToken } from "../middleware/requireSessionToken.js";
 
 // App API consumed by the React front end. Mounted at /api (server/routes/index.js),
 // so the routes below are defined relative to that prefix.
@@ -86,6 +98,54 @@ router.get("/context", async (req, res, next) => {
             });
         }
         res.json({ success: true, data: result.data?.data ?? result.data });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// GET /api/session
+// Example of a route authenticated by a Salesive SESSION TOKEN instead of the
+// cookie. The front end sends `Authorization: Bearer <getSessionToken()>`;
+// requireSessionToken verifies it and sets req.shop from the token. Copy this
+// pattern for your own routes.
+router.get("/session", requireSessionToken, async (req, res) => {
+    res.json({
+        success: true,
+        shop: req.shop,
+        user: req.salesiveUser,
+        installed: await store.isInstalled(req.shop),
+        expiresAt: new Date(req.sessionToken.exp * 1000).toISOString(),
+    });
+});
+
+// POST /api/session/exchange
+// The embedded install: no OAuth redirect. The front end sends a FRESH session
+// token (getSessionToken({ forceRefresh: true })). If we already hold a live
+// install for that store we keep it; otherwise we trade the token for an access
+// token (token exchange) and store it. Either way we then set the usual session
+// cookie, so every cookie based route in the starter keeps working.
+router.post("/session/exchange", requireSessionToken, async (req, res, next) => {
+    try {
+        const shop = req.shop;
+        let installed = await verifyInstallation(shop).catch(() => false);
+        if (!installed) {
+            let tokens;
+            try {
+                tokens = await exchangeSessionToken(bearerFrom(req));
+            } catch (err) {
+                // 400/401: the token was already used, the app is not installed on
+                // this store, or the client secret is wrong. The gate falls back to
+                // the redirect install.
+                if (err?.status === 400 || err?.status === 401) {
+                    return res.status(401).json({ success: false, message: "Token exchange refused" });
+                }
+                throw err;
+            }
+            await persistTokens(shop, tokens, { shop });
+            installed = true;
+        }
+        setSessionCookie(res, shop, req.salesiveUser.id);
+        res.json({ success: true, shop, installed });
     } catch (err) {
         next(err);
     }

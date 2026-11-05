@@ -21,8 +21,8 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 // doesn't match the host the request was sent to, it's a forged cross-site call.
 // (Comparing Origin's host to the Host header is config-independent — it doesn't
 // depend on APP_BASE_URL being set perfectly.) GET/HEAD change no state, so they
-// are exempt. The robust long-term upgrade is an App Bridge session token in an
-// Authorization header instead of a cookie (see README → Before production).
+// are exempt. The robust upgrade is a Salesive session token in an Authorization
+// header instead of a cookie: see requireSessionToken.js and README "Session tokens".
 export function requireShop(req, res, next) {
     if (!SAFE_METHODS.has(req.method)) {
         const origin = req.headers.origin;
