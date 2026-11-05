@@ -39,6 +39,7 @@ const claims = (over = {}) => ({
     sid: "s1",
     installation: "inst_1",
     role: "staff",
+    purpose: "session",
     ...over,
 });
 
@@ -72,6 +73,18 @@ test("rejects a foreign key, a tampered body, alg none and HS256", async () => {
 test("a token for another purpose is refused", async () => {
     await assert.rejects(verifySessionToken(sign(claims({ purpose: "mcp" }))), /wrong purpose/);
     assert.equal((await verifySessionToken(sign(claims({ purpose: "session" })))).dest, "shop_1");
+});
+
+test("an MCP server verifies purpose mcp and refuses session tokens", async () => {
+    const out = await verifySessionToken(sign(claims({ purpose: "mcp" })), { purpose: "mcp" });
+    assert.equal(out.purpose, "mcp");
+    await assert.rejects(verifySessionToken(sign(claims()), { purpose: "mcp" }), /wrong purpose/);
+});
+
+test("a token with no purpose is refused", async () => {
+    const { purpose, ...rest } = claims();
+    assert.equal(purpose, "session");
+    await assert.rejects(verifySessionToken(sign(rest)), /wrong purpose/);
 });
 
 test("an unknown kid is refused", async () => {

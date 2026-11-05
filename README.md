@@ -152,7 +152,11 @@ naming the store (`dest`), the signed in user (`sub`, with `role` owner or staff
 
 - **Verify it** with `server/sessionToken.js`. It fetches and caches Salesive's public key from
   `<SALESIVE_API_BASE>/api/v1/oauth/jwks` and checks the signature, `alg`, `aud`, `iss`, `exp` and
-  `nbf`. Never skip the `aud` check: every app's tokens share one signing key.
+  `nbf`, and `purpose`. Never skip the `aud` check: every app's tokens share one signing key.
+- **Same verifier for an MCP server.** If you add an MCP server for Ola, its requests carry a
+  token from the same key with the same claims and `purpose: "mcp"`. Verify it with
+  `verifySessionToken(token, { purpose: "mcp" })`. Each purpose is refused where the other is
+  expected.
 - **Gate a route** with `requireSessionToken` (`server/middleware/requireSessionToken.js`), which
   sets `req.shop` from the token. `GET /api/session` is a worked example.
 - **Install without the redirect.** On first load inside the dashboard, if there is no cookie session,

@@ -19,7 +19,9 @@ import { config } from "./config.js";
 //           key, so without this check another app's token would be accepted.
 //   iss     must be the Salesive API you talk to
 //   exp/nbf with a few seconds of clock tolerance
-//   purpose "session" (other Salesive tokens for your app, such as "mcp", are refused)
+//   purpose "session" by default (other Salesive tokens for your app are refused).
+//           If you add an MCP server for Ola, verify its bearer tokens with
+//           verifySessionToken(token, { purpose: "mcp" }): same key, same claims.
 
 const LEEWAY_SECONDS = 5;
 const JWKS_TTL_MS = 60 * 60 * 1000;
@@ -81,7 +83,10 @@ const decodePart = (part) => {
  * SessionTokenError. `dest` is the store id, `sub` the user id, `role` is
  * "owner" or "staff", `installation` the installation id.
  */
-export async function verifySessionToken(token, { clientId = config.clientId, issuer = config.apiBase, now = Date.now() } = {}) {
+export async function verifySessionToken(
+    token,
+    { clientId = config.clientId, issuer = config.apiBase, purpose = "session", now = Date.now() } = {},
+) {
     if (!clientId) throw new SessionTokenError("SALESIVE_CLIENT_ID is not set");
     const parts = typeof token === "string" ? token.split(".") : [];
     if (parts.length !== 3) throw new SessionTokenError("malformed");
@@ -111,8 +116,9 @@ export async function verifySessionToken(token, { clientId = config.clientId, is
         throw new SessionTokenError("not yet valid");
     }
     // Salesive signs other tokens for your app too (purpose "mcp" for Ola's calls to
-    // your MCP server). Only dashboard session tokens belong on these routes.
-    if (claims.purpose && claims.purpose !== "session") throw new SessionTokenError("wrong purpose");
+    // your MCP server). Each route accepts only the purpose it expects, so an MCP token
+    // is refused on session routes and a session token on an MCP server.
+    if (!purpose || claims.purpose !== purpose) throw new SessionTokenError("wrong purpose");
     if (!claims.dest || !claims.sub) throw new SessionTokenError("missing claims");
     return claims;
 }
