@@ -19,6 +19,7 @@ import { config } from "./config.js";
 //           key, so without this check another app's token would be accepted.
 //   iss     must be the Salesive API you talk to
 //   exp/nbf with a few seconds of clock tolerance
+//   purpose "session" (other Salesive tokens for your app, such as "mcp", are refused)
 
 const LEEWAY_SECONDS = 5;
 const JWKS_TTL_MS = 60 * 60 * 1000;
@@ -109,6 +110,9 @@ export async function verifySessionToken(token, { clientId = config.clientId, is
     if (typeof claims.nbf === "number" && nowSec + LEEWAY_SECONDS < claims.nbf) {
         throw new SessionTokenError("not yet valid");
     }
+    // Salesive signs other tokens for your app too (purpose "mcp" for Ola's calls to
+    // your MCP server). Only dashboard session tokens belong on these routes.
+    if (claims.purpose && claims.purpose !== "session") throw new SessionTokenError("wrong purpose");
     if (!claims.dest || !claims.sub) throw new SessionTokenError("missing claims");
     return claims;
 }

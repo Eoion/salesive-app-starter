@@ -69,6 +69,11 @@ test("rejects a foreign key, a tampered body, alg none and HS256", async () => {
     await assert.rejects(verifySessionToken("not-a-jwt"), /malformed/);
 });
 
+test("a token for another purpose is refused", async () => {
+    await assert.rejects(verifySessionToken(sign(claims({ purpose: "mcp" }))), /wrong purpose/);
+    assert.equal((await verifySessionToken(sign(claims({ purpose: "session" })))).dest, "shop_1");
+});
+
 test("an unknown kid is refused", async () => {
     await assert.rejects(verifySessionToken(sign(claims(), { kid: "rotated" })), /unknown key/);
 });
