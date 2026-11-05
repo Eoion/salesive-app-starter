@@ -318,3 +318,108 @@ export function getSessionToken({ timeoutMs = 10_000, forceRefresh = false } = {
     request.then(clear, clear);
     return request;
 }
+
+// ── Dashboard UI extensions ──────────────────────────────────────────────────
+// Actions (opened in a modal from an order/product/customer page's Apps menu) and
+// blocks (a card inside the page). Declared in the developer console. Mirrors
+// salesive-dev-tools/permissions; keep the message names in step with it.
+//
+// import { isExtension, getExtensionContext, autoResizeExtension, closeExtension } from "@/lib/permissions";
+// if (isExtension()) {
+//     const ctx = await getExtensionContext(); // { target, kind, resource: { type, id }, shopId, installationId, label }
+//     autoResizeExtension();
+//     closeExtension({ reload: true });        // done: close the modal, refetch the page
+// }
+
+const MSG_EXTENSION_CONTEXT = "salesive:extension-context";
+const MSG_GET_EXTENSION_CONTEXT = "salesive:get-extension-context";
+const MSG_EXTENSION_RESIZE = "salesive:extension-resize";
+const MSG_EXTENSION_CLOSE = "salesive:extension-close";
+
+let extensionContext = null;
+const extensionContextCallbacks = new Set();
+
+window.addEventListener("message", (event) => {
+    const data = event.data || {};
+    // Only the dashboard (our parent) may say which resource we show.
+    if (data.type !== MSG_EXTENSION_CONTEXT || event.source !== PARENT) return;
+    if (typeof data.target !== "string") return;
+    extensionContext = {
+        target: data.target,
+        kind: data.kind === "action" ? "action" : "block",
+        resource: data.resource || { type: "order", id: "" },
+        shopId: data.shopId ?? null,
+        installationId: data.installationId ?? null,
+        label: data.label ?? null,
+    };
+    extensionContextCallbacks.forEach((cb) => cb(extensionContext));
+});
+
+/** True when this page runs as a dashboard UI extension (the URL has `extension=`). */
+export function isExtension() {
+    if (!PARENT) return false;
+    try {
+        return new URL(window.location.href).searchParams.has("extension");
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * The extension's target and resource, or null when not an extension / no answer.
+ * The id is a pointer, not a permission: load the resource through the API with your token.
+ * @param {number} [timeoutMs=5000]
+ */
+export function getExtensionContext(timeoutMs = 5_000) {
+    if (extensionContext) return Promise.resolve(extensionContext);
+    if (!PARENT) return Promise.resolve(null);
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            extensionContextCallbacks.delete(done);
+            resolve(null);
+        }, timeoutMs);
+        const done = (ctx) => {
+            clearTimeout(timer);
+            extensionContextCallbacks.delete(done);
+            resolve(ctx);
+        };
+        extensionContextCallbacks.add(done);
+        PARENT.postMessage({ type: MSG_GET_EXTENSION_CONTEXT }, "*");
+    });
+}
+
+/** Called now if the context is known, and whenever the dashboard sends it. */
+export function onExtensionContext(callback) {
+    extensionContextCallbacks.add(callback);
+    if (extensionContext) callback(extensionContext);
+    return () => extensionContextCallbacks.delete(callback);
+}
+
+/** Set the frame height in px (blocks 48 to 600, actions 120 to 720). */
+export function resizeExtension(height) {
+    if (!Number.isFinite(height)) return;
+    PARENT?.postMessage({ type: MSG_EXTENSION_RESIZE, height: Math.ceil(height) }, "*");
+}
+
+/** Keep the frame as tall as the content. Returns a stop function. */
+export function autoResizeExtension() {
+    if (!PARENT || typeof ResizeObserver === "undefined") return () => {};
+    let last = 0;
+    const measure = () => {
+        const h = Math.ceil(document.documentElement.scrollHeight);
+        if (h !== last) {
+            last = h;
+            resizeExtension(h);
+        }
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.documentElement);
+    if (document.body) observer.observe(document.body);
+    measure();
+    return () => observer.disconnect();
+}
+
+/** Close an action's modal (or hide a block). `reload: true` asks the page to refetch. */
+export function closeExtension({ reload = false } = {}) {
+    PARENT?.postMessage({ type: MSG_EXTENSION_CLOSE, reload: reload === true }, "*");
+}
