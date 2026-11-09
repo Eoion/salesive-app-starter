@@ -221,7 +221,7 @@ client/              the whole front end — kept OUT of the repo root on purpos
   src/App.jsx        <Routes> + session guard + Toast/Socket providers
   src/routes/        notes/ (NotesShell · NotesList · NoteCreate · NoteDetail · NoteForm) · Install · NotFound
   src/components/    Layout (top strip) · ui (buttons/forms/badges) · Avatar · Toast · Confirm · States · icons
-  src/lib/           api (CRUD client) · socket (live webhooks) · shop (session context) · permissions (optional embedded-runtime SDK) · format · hooks
+  src/lib/           api (CRUD client) · socket (live webhooks) · shop (session context) · permissions + webmcp (re-exports of the salesive-dev-tools SDK bridge — hardened, origin-checked) · format · hooks
   build.mjs          production build entry (`npm run build`) → ../dist
   vite.config.js / tailwind.config.js / postcss.config.js
 ```

@@ -1,11 +1,15 @@
 /**
  * Salesive App Bridge — runtime permission & lifecycle helpers.
  *
- * Use these from your app's client-side code to:
- *   · Request capabilities beyond your OAuth install scopes (permission modal).
- *   · Query which permissions have already been granted without a modal.
- *   · Listen for open / minimize lifecycle events from the dashboard.
- *   · Ask the dashboard to expand the app when it's minimized (AUTO_LAUNCH).
+ * This used to be a vendored copy of the bridge. It is now a re-export of the
+ * hardened implementation in the `salesive-dev-tools` package, which every app
+ * should do too: one import replaces the copy, and bridge fixes reach your app
+ * with an `npm update` instead of a hand-mirrored file.
+ *
+ * The SDK version is safe by default where the old copy was not: it resolves
+ * the dashboard origin (from the referrer, or pinned via initBridge) and drops
+ * every message that does not come from exactly that origin and the parent
+ * window. It never posts to a wildcard target.
  *
  * Usage
  * -----
@@ -24,7 +28,7 @@
  * onAppMinimized(() => { startMyTimer(); });
  * onAppOpened(() => { clearMyTimer(); });
  *
- * // Ask the dashboard to expand (only works if AUTO_LAUNCH is granted):
+ * // Ask the dashboard to expand the app (AUTO_LAUNCH grant required):
  * onLaunch();
  *
  * // Prove to your own backend which store and user is calling:
@@ -32,394 +36,30 @@
  * fetch("/api/session", { headers: { Authorization: `Bearer ${token}` } });
  */
 
-const PARENT = window.parent !== window ? window.parent : null;
-
-const MSG_REQUEST = "salesive:request-permission";
-const MSG_RESPONSE = "salesive:permission-response";
-const MSG_LAUNCH = "salesive:launch";
-const MSG_GET_PERMISSIONS = "salesive:get-permissions";
-const MSG_PERMISSIONS_STATE = "salesive:permissions-state";
-const MSG_APP_OPENED = "salesive:app-opened";
-const MSG_APP_MINIMIZED = "salesive:app-minimized";
-const MSG_APP_CLOSED = "salesive:app-closed";
-const MSG_APP_WAKE = "salesive:app-wake";
-const MSG_APP_LOGOUT = "salesive:app-logout";
-const MSG_STORE_CHANGED = "salesive:store-changed";
-
-// One-time pending resolvers keyed by permission name.
-const pendingPermissions = {};
-// One-shot resolver for getGrantedPermissions.
-let pendingGrants = null;
-// Lifecycle callbacks.
-const openedCallbacks    = new Set();
-const minimizedCallbacks = new Set();
-const closedCallbacks    = new Set();
-const wakeCallbacks      = new Set();
-// Session-boundary callbacks.
-const logoutCallbacks       = new Set();
-const storeChangedCallbacks = new Set();
-const genericCallbacks   = new Map();
-
-// Single shared listener — all incoming messages routed here.
-window.addEventListener("message", (event) => {
-    const { type, permission, granted, mode, expiresAt, permissions,
-            shopId, shopName, previousShopId } = event.data || {};
-
-    if (type === MSG_RESPONSE && permission) {
-        const resolve = pendingPermissions[permission];
-        if (resolve) {
-            delete pendingPermissions[permission];
-            resolve({ granted: Boolean(granted), mode, expiresAt });
-        }
-    } else if (type === MSG_PERMISSIONS_STATE) {
-        if (pendingGrants) {
-            const resolve = pendingGrants;
-            pendingGrants = null;
-            resolve(permissions || {});
-        }
-    } else if (type === MSG_APP_WAKE) {
-        wakeCallbacks.forEach((cb) => cb());
-    } else if (type === MSG_APP_OPENED) {
-        openedCallbacks.forEach((cb) => cb());
-    } else if (type === MSG_APP_MINIMIZED) {
-        minimizedCallbacks.forEach((cb) => cb());
-    } else if (type === MSG_APP_CLOSED) {
-        closedCallbacks.forEach((cb) => cb());
-    } else if (type === MSG_APP_LOGOUT) {
-        logoutCallbacks.forEach((cb) => cb());
-    } else if (type === MSG_STORE_CHANGED && shopId) {
-        const payload = { shopId, shopName, previousShopId: previousShopId ?? null };
-        storeChangedCallbacks.forEach((cb) => cb(payload));
-    }
-    if (type) {
-        const cbs = genericCallbacks.get(type);
-        if (cbs?.size) cbs.forEach((cb) => cb(event.data));
-    }
-});
-
-/**
- * Request a runtime permission from the merchant via a dashboard modal.
- *
- * @param {"AUTO_LAUNCH"|"WRITE_DOMAINS"|"CLIPBOARD_READ"|"WRITE_ORDERS_CANCEL"} permission
- * @param {Array<"once"|"1day"|"7days"|"14days"|"31days">} [options] - Duration choices to show.
- *   Defaults to all five if omitted. First element is the default selection in the modal.
- * @param {number} [timeoutMs=30_000]
- * @returns {Promise<boolean>}
- */
-export function requestPermission(permission, options = null, timeoutMs = 30_000) {
-    if (!PARENT) return Promise.resolve(false);
-    return new Promise((resolve) => {
-        pendingPermissions[permission] = ({ granted }) => resolve(granted);
-        PARENT.postMessage({ type: MSG_REQUEST, permission, ...(options ? { options } : {}) }, "*");
-        setTimeout(() => {
-            if (pendingPermissions[permission]) {
-                delete pendingPermissions[permission];
-                resolve(false);
-            }
-        }, timeoutMs);
-    });
-}
-
-/**
- * Get currently active permission grants without showing any modal.
- * Returns a map of `{ [permission]: { mode, grantedAt, expiresAt } }`.
- *
- * @param {number} [timeoutMs=5_000]
- * @returns {Promise<Record<string, object>>}
- */
-export function getGrantedPermissions(timeoutMs = 5_000) {
-    if (!PARENT) return Promise.resolve({});
-    return new Promise((resolve) => {
-        pendingGrants = resolve;
-        PARENT.postMessage({ type: MSG_GET_PERMISSIONS }, "*");
-        setTimeout(() => {
-            if (pendingGrants === resolve) {
-                pendingGrants = null;
-                resolve({});
-            }
-        }, timeoutMs);
-    });
-}
-
-/**
- * Ask the dashboard to expand (un-minimize) this app. Only honoured if the
- * merchant has granted the AUTO_LAUNCH runtime permission.
- */
-export function onLaunch() {
-    PARENT?.postMessage({ type: MSG_LAUNCH }, "*");
-}
-
-/**
- * Register a callback that fires whenever the app is expanded/opened.
- * Returns an unsubscribe function.
- * @param {() => void} callback
- * @returns {() => void}
- */
-export function onAppOpened(callback) {
-    openedCallbacks.add(callback);
-    return () => openedCallbacks.delete(callback);
-}
-
-/**
- * Register a callback that fires whenever the app is minimized.
- * Returns an unsubscribe function.
- * @param {() => void} callback
- * @returns {() => void}
- */
-export function onAppMinimized(callback) {
-    minimizedCallbacks.add(callback);
-    return () => minimizedCallbacks.delete(callback);
-}
-
-/**
- * Register a callback that fires when the merchant presses × (close).
- * The app keeps running in the background — use this to save state.
- * Returns an unsubscribe function.
- * @param {() => void} callback
- * @returns {() => void}
- */
-export function onAppClosed(callback) {
-    closedCallbacks.add(callback);
-    return () => closedCallbacks.delete(callback);
-}
-
-/**
- * Register a callback that fires when the dashboard first wakes the app in
- * the background (on dashboard load, before the merchant opens the app).
- * Returns an unsubscribe function.
- * @param {() => void} callback
- * @returns {() => void}
- */
-export function onAppWake(callback) {
-    wakeCallbacks.add(callback);
-    return () => wakeCallbacks.delete(callback);
-}
-
-/**
- * Register a callback that fires when the merchant logs out of Salesive.
- * The dashboard clears only its own origin's storage — this app is on another
- * origin, so clear its token here or the next merchant to log in on this
- * browser inherits the session.
- * Must be synchronous: the dashboard waits ~150ms, then destroys the iframe.
- * Use navigator.sendBeacon() if the server must be told too.
- * Returns an unsubscribe function.
- * @param {() => void} callback
- * @returns {() => void}
- */
-export function onLogout(callback) {
-    logoutCallbacks.add(callback);
-    return () => logoutCallbacks.delete(callback);
-}
-
-/**
- * Register a callback that fires when the merchant switches the active store.
- * The iframe reloads immediately after with the new `shop` query param, so that
- * reload — not this callback — is what boots the app under the new store. Use
- * this to drop caches that outlive a reload (IndexedDB, localStorage) and to
- * save in-progress work. Keep it synchronous.
- * Returns an unsubscribe function.
- * @param {(store: { shopId: string, shopName?: string, previousShopId: string|null }) => void} callback
- * @returns {() => void}
- */
-export function onStoreChanged(callback) {
-    storeChangedCallbacks.add(callback);
-    return () => storeChangedCallbacks.delete(callback);
-}
-
-/**
- * Listen for any postMessage event type — including future types not yet in
- * this helper. Callback receives the full raw message data object.
- * Returns an unsubscribe function.
- * @param {string} type
- * @param {(data: object) => void} callback
- * @returns {() => void}
- */
-export function onEvent(type, callback) {
-    if (!genericCallbacks.has(type)) genericCallbacks.set(type, new Set());
-    const cbs = genericCallbacks.get(type);
-    cbs.add(callback);
-    return () => cbs.delete(callback);
-}
-
-// ── Session tokens ────────────────────────────────────────────────────────────
-// Mirrors getSessionToken() in salesive-dev-tools/permissions. Keep them in step.
-
-const MSG_GET_SESSION_TOKEN = "salesive:get-session-token";
-const MSG_SESSION_TOKEN = "salesive:session-token";
-// Refresh this long before expiry so a token never dies in flight to your backend.
-const SESSION_TOKEN_REFRESH_MARGIN_MS = 10_000;
-const pendingSessionTokens = {};
-let sessionTokenSeq = 0;
-let cachedSessionToken = null; // { token, expiresAtMs }
-let inflightToken = null;
-
-export class SessionTokenError extends Error {
-    constructor(code, message) {
-        super(message || code);
-        this.name = "SessionTokenError";
-        this.code = code;
-    }
-}
-
-window.addEventListener("message", (event) => {
-    const { type, requestId, token, expiresAt, error } = event.data || {};
-    if (type === MSG_APP_LOGOUT || type === MSG_STORE_CHANGED) {
-        cachedSessionToken = null;
-        return;
-    }
-    // Only the dashboard (our parent window) may answer.
-    if (type !== MSG_SESSION_TOKEN || !requestId || event.source !== PARENT) return;
-    const resolve = pendingSessionTokens[requestId];
-    if (resolve) {
-        delete pendingSessionTokens[requestId];
-        resolve({ token, expiresAt, error });
-    }
-});
-
-/**
- * Get a session token: a 60 second JWT, signed by Salesive, that proves to YOUR
- * backend which store (`dest`) and which signed in user (`sub`) is using the app.
- * Send it as `Authorization: Bearer <token>`; the server verifies it in
- * server/sessionToken.js. Cached here until shortly before it expires, so call it
- * before every request.
- *
- * @param {{ timeoutMs?: number, forceRefresh?: boolean }} [options]
- * @returns {Promise<string>} rejects with SessionTokenError (`code`: not_embedded,
- *   timeout, not_installed, or the dashboard's error)
- */
-export function getSessionToken({ timeoutMs = 10_000, forceRefresh = false } = {}) {
-    if (!PARENT) return Promise.reject(new SessionTokenError("not_embedded", "Not running inside the Salesive dashboard"));
-    if (!forceRefresh && cachedSessionToken && cachedSessionToken.expiresAtMs - SESSION_TOKEN_REFRESH_MARGIN_MS > Date.now()) {
-        return Promise.resolve(cachedSessionToken.token);
-    }
-    if (!forceRefresh && inflightToken) return inflightToken;
-
-    const requestId = `st_${Date.now()}_${++sessionTokenSeq}`;
-    const request = new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            if (pendingSessionTokens[requestId]) {
-                delete pendingSessionTokens[requestId];
-                reject(new SessionTokenError("timeout", "The dashboard did not answer the session token request"));
-            }
-        }, timeoutMs);
-        pendingSessionTokens[requestId] = ({ token, expiresAt, error }) => {
-            clearTimeout(timer);
-            if (!token || error) return reject(new SessionTokenError(error || "unavailable"));
-            const expiresAtMs = expiresAt ? Date.parse(expiresAt) : NaN;
-            cachedSessionToken = { token, expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() };
-            resolve(token);
-        };
-        PARENT.postMessage({ type: MSG_GET_SESSION_TOKEN, requestId }, "*");
-    });
-    inflightToken = request;
-    const clear = () => {
-        if (inflightToken === request) inflightToken = null;
-    };
-    request.then(clear, clear);
-    return request;
-}
-
-// ── Dashboard UI extensions ──────────────────────────────────────────────────
-// Actions (opened in a modal from an order/product/customer page's Apps menu) and
-// blocks (a card inside the page). Declared in the developer console. Mirrors
-// salesive-dev-tools/permissions; keep the message names in step with it.
-//
-// import { isExtension, getExtensionContext, autoResizeExtension, closeExtension } from "@/lib/permissions";
-// if (isExtension()) {
-//     const ctx = await getExtensionContext(); // { target, kind, resource: { type, id }, shopId, installationId, label }
-//     autoResizeExtension();
-//     closeExtension({ reload: true });        // done: close the modal, refetch the page
-// }
-
-const MSG_EXTENSION_CONTEXT = "salesive:extension-context";
-const MSG_GET_EXTENSION_CONTEXT = "salesive:get-extension-context";
-const MSG_EXTENSION_RESIZE = "salesive:extension-resize";
-const MSG_EXTENSION_CLOSE = "salesive:extension-close";
-
-let extensionContext = null;
-const extensionContextCallbacks = new Set();
-
-window.addEventListener("message", (event) => {
-    const data = event.data || {};
-    // Only the dashboard (our parent) may say which resource we show.
-    if (data.type !== MSG_EXTENSION_CONTEXT || event.source !== PARENT) return;
-    if (typeof data.target !== "string") return;
-    extensionContext = {
-        target: data.target,
-        kind: data.kind === "action" ? "action" : "block",
-        resource: data.resource || { type: "order", id: "" },
-        shopId: data.shopId ?? null,
-        installationId: data.installationId ?? null,
-        label: data.label ?? null,
-    };
-    extensionContextCallbacks.forEach((cb) => cb(extensionContext));
-});
-
-/** True when this page runs as a dashboard UI extension (the URL has `extension=`). */
-export function isExtension() {
-    if (!PARENT) return false;
-    try {
-        return new URL(window.location.href).searchParams.has("extension");
-    } catch {
-        return false;
-    }
-}
-
-/**
- * The extension's target and resource, or null when not an extension / no answer.
- * The id is a pointer, not a permission: load the resource through the API with your token.
- * @param {number} [timeoutMs=5000]
- */
-export function getExtensionContext(timeoutMs = 5_000) {
-    if (extensionContext) return Promise.resolve(extensionContext);
-    if (!PARENT) return Promise.resolve(null);
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-            extensionContextCallbacks.delete(done);
-            resolve(null);
-        }, timeoutMs);
-        const done = (ctx) => {
-            clearTimeout(timer);
-            extensionContextCallbacks.delete(done);
-            resolve(ctx);
-        };
-        extensionContextCallbacks.add(done);
-        PARENT.postMessage({ type: MSG_GET_EXTENSION_CONTEXT }, "*");
-    });
-}
-
-/** Called now if the context is known, and whenever the dashboard sends it. */
-export function onExtensionContext(callback) {
-    extensionContextCallbacks.add(callback);
-    if (extensionContext) callback(extensionContext);
-    return () => extensionContextCallbacks.delete(callback);
-}
-
-/** Set the frame height in px (blocks 48 to 600, actions 120 to 720). */
-export function resizeExtension(height) {
-    if (!Number.isFinite(height)) return;
-    PARENT?.postMessage({ type: MSG_EXTENSION_RESIZE, height: Math.ceil(height) }, "*");
-}
-
-/** Keep the frame as tall as the content. Returns a stop function. */
-export function autoResizeExtension() {
-    if (!PARENT || typeof ResizeObserver === "undefined") return () => {};
-    let last = 0;
-    const measure = () => {
-        const h = Math.ceil(document.documentElement.scrollHeight);
-        if (h !== last) {
-            last = h;
-            resizeExtension(h);
-        }
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(document.documentElement);
-    if (document.body) observer.observe(document.body);
-    measure();
-    return () => observer.disconnect();
-}
-
-/** Close an action's modal (or hide a block). `reload: true` asks the page to refetch. */
-export function closeExtension({ reload = false } = {}) {
-    PARENT?.postMessage({ type: MSG_EXTENSION_CLOSE, reload: reload === true }, "*");
-}
+export {
+    initBridge,
+    setDashboardOrigin,
+    getDashboardOrigin,
+    requestPermission,
+    getGrantedPermissions,
+    getSessionToken,
+    SessionTokenError,
+    pickFiles,
+    onLaunch,
+    onAppWake,
+    onAppOpened,
+    onAppMinimized,
+    onAppClosed,
+    onLogout,
+    onStoreChanged,
+    onEvent,
+    isExtension,
+    getExtensionContext,
+    onExtensionContext,
+    resizeExtension,
+    autoResizeExtension,
+    closeExtension,
+    PERMISSIONS,
+    DURATIONS,
+    APP_EVENTS,
+} from "salesive-dev-tools/permissions";

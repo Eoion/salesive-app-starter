@@ -32,6 +32,7 @@
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
         "react-router-dom": "^6.30.4",
+        "salesive-dev-tools": "^0.6.5",
         "socket.io": "^4.7.5",
         "socket.io-client": "^4.7.5",
         "tailwindcss": "^3.4.6",
